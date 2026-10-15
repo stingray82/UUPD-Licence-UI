@@ -193,7 +193,7 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
 
     class UUPD_License_UI {
 
-        const VERSION = '1.0.0';
+        const VERSION = '1.0.1';
 
         /** @var array<string,self> */
         protected static $instances = [];
@@ -668,6 +668,9 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
                                     </div>
                                 </div>
                             </form>
+                            <?php if ( ! $is_const && $license ) : ?>
+                                <?php $this->render_clear_local_form( admin_url( 'admin.php?page=' . $c['menu_slug'] ) ); ?>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -736,6 +739,37 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
                     </a>
                 </p>
             </div>
+            <?php
+        }
+
+        /**
+         * Recovery-only action. Does not contact the license server.
+         * A separate form avoids nesting forms within the normal activation UI.
+         *
+         * @param string $redirect URL to return to after clearing.
+         */
+        protected function render_clear_local_form( $redirect = '' ) {
+            if ( $this->license_is_constant_managed() || ! current_user_can( $this->config['capability'] ) ) {
+                return;
+            }
+            $c = $this->config;
+            ?>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>"
+                style="margin:10px 0 0"
+                onsubmit="return confirm('<?php echo esc_js( __( 'Clear the locally stored license? This will NOT deactivate the site on the license server or free a remote activation.', 'default' ) ); ?>');">
+                <input type="hidden" name="action" value="uupd_license_action" />
+                <input type="hidden" name="uupd_action" value="clear_local" />
+                <input type="hidden" name="uupd_vendor" value="<?php echo esc_attr( $c['vendor'] ); ?>" />
+                <input type="hidden" name="uupd_slug" value="<?php echo esc_attr( $c['slug'] ); ?>" />
+                <input type="hidden" name="uupd_redirect" value="<?php echo esc_attr( $redirect ); ?>" />
+                <?php wp_nonce_field( 'uupd_license_action_' . $c['instance_key'], 'uupd_license_nonce' ); ?>
+                <button type="submit" class="button-link" style="font-size:12px;color:#b32d2e">
+                    <?php esc_html_e( 'Clear local licence', 'default' ); ?>
+                </button>
+                <span class="description" style="font-size:12px">
+                    <?php esc_html_e( 'Warning: does not release a remote activation.', 'default' ); ?>
+                </span>
+            </form>
             <?php
         }
 
@@ -819,6 +853,16 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
             $option_name = $c['option_name'];
 
             $this->log( sprintf( 'Using UUPD_License_UI version %s', self::VERSION ) );
+
+            if ( $action === 'clear_local' ) {
+                if ( $this->license_is_constant_managed() ) {
+                    return; // wp-config.php overrides cannot be cleared from the UI.
+                }
+                delete_option( $option_name );
+                $this->flush_updater_cache();
+                $this->log( 'Locally stored license cleared without contacting the server.' );
+                return;
+            }
 
             if ( $action === 'activate' ) {
                 if ( empty( $license_key ) ) {
@@ -1605,6 +1649,9 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
                                 <div class="uupd-license-error"><?php echo esc_html( $last_error ); ?></div>
                             <?php endif; ?>
                         </form>
+                        <?php if ( ! $is_const && $license ) : ?>
+                            <?php $inst->render_clear_local_form( $current_url ); ?>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
