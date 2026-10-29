@@ -95,6 +95,7 @@
  * - option_name
  * - menu_parent
  * - menu_slug
+ * - return_url (optional; preferred redirect for embedded UIs)
  * - page_title
  * - menu_title
  * - capability
@@ -193,7 +194,7 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
 
     class UUPD_License_UI {
 
-        const VERSION = '1.0.1';
+        const VERSION = '1.0.2';
 
         /** @var array<string,self> */
         protected static $instances = [];
@@ -266,6 +267,7 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
                 'option_name'        => '',
                 'menu_parent'        => 'options-general.php',
                 'menu_slug'          => '',
+                'return_url'         => '',
                 'page_title'         => '',
                 'menu_title'         => '',
                 'license_provider'   => 'uupd', // Potential expansion to providers such as Lemon Squeezy and SureCart
@@ -441,6 +443,28 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
         }
 
         /**
+         * Return the explicitly configured destination for an embedded licence UI.
+         *
+         * An empty value preserves legacy URL construction and form redirects.
+         * URLs must be inside the WordPress admin area on this installation.
+         *
+         * @return string Empty when not configured or not an allowed admin URL.
+         */
+        public function get_return_url() {
+            $configured = isset( $this->config['return_url'] ) ? $this->config['return_url'] : '';
+            if ( ! is_string( $configured ) || '' === trim( $configured ) ) {
+                return '';
+            }
+            $url = wp_validate_redirect( trim( $configured ), '' );
+            $admin_base = admin_url();
+            // Prevent external redirects and same-origin URLs outside wp-admin.
+            if ( '' === $url || 0 !== strpos( $url, $admin_base ) ) {
+                return '';
+            }
+            return $url;
+        }
+
+        /**
          * Render the main license management page.
          */
         public function render_page() {
@@ -587,6 +611,9 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
                                 <input type="hidden" name="action" value="uupd_license_action" />
                                 <input type="hidden" name="uupd_vendor" value="<?php echo esc_attr( $vendor ); ?>" />
                                 <input type="hidden" name="uupd_slug" value="<?php echo esc_attr( $slug ); ?>" />
+                                <?php if ( $this->get_return_url() ) : ?>
+                                    <input type="hidden" name="uupd_redirect" value="<?php echo esc_attr( $this->get_return_url() ); ?>" />
+                                <?php endif; ?>
 
                                 <div class="uupd-license-field">
                                     <?php if ( $is_const ) : ?>
@@ -669,7 +696,7 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
                                 </div>
                             </form>
                             <?php if ( ! $is_const && $license ) : ?>
-                                <?php $this->render_clear_local_form( admin_url( 'admin.php?page=' . $c['menu_slug'] ) ); ?>
+                                <?php $this->render_clear_local_form( $this->get_return_url() ?: admin_url( 'admin.php?page=' . $c['menu_slug'] ) ); ?>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -722,14 +749,16 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
                 __( 'Please activate your %s license to enable updates and support.', 'default' ),
                 $c['plugin_name']
             );
-
-            $url = add_query_arg(
-                [ 'page' => $this->config['menu_slug'] ],
-                admin_url( $this->config['menu_parent'] === 'options-general.php' || empty( $this->config['menu_parent'] )
-                    ? 'options-general.php'
-                    : 'admin.php'
-                )
-            );
+            $url = $this->get_return_url();
+            if ( ! $url ) {
+                $url = add_query_arg(
+                    [ 'page' => $this->config['menu_slug'] ],
+                    admin_url( $this->config['menu_parent'] === 'options-general.php' || empty( $this->config['menu_parent'] )
+                        ? 'options-general.php'
+                        : 'admin.php'
+                    )
+                );
+            }
             ?>
             <div class="notice notice-warning">
                 <p>
@@ -836,7 +865,10 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
             );
 
             $redirect_raw = isset( $_POST['uupd_redirect'] ) ? wp_unslash( $_POST['uupd_redirect'] ) : '';
-            $redirect = $redirect_raw ? wp_validate_redirect( $redirect_raw, $default_redirect ) : $default_redirect;
+            $configured_redirect = $inst->get_return_url();
+            $redirect = $configured_redirect
+                ? $configured_redirect
+                : ( $redirect_raw ? wp_validate_redirect( $redirect_raw, $default_redirect ) : $default_redirect );
 
             wp_safe_redirect( $redirect );
             exit;
@@ -1593,8 +1625,8 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
                             <input type="hidden" name="action" value="uupd_license_action" />
                             <input type="hidden" name="uupd_vendor" value="<?php echo esc_attr( $c['vendor'] ); ?>" />
                             <input type="hidden" name="uupd_slug" value="<?php echo esc_attr( $c['slug'] ); ?>" />
-                            <?php if ( $current_url ) : ?>
-                                <input type="hidden" name="uupd_redirect" value="<?php echo esc_attr( $current_url ); ?>" />
+                            <?php if ( $current_url || $inst->get_return_url() ) : ?>
+                                <input type="hidden" name="uupd_redirect" value="<?php echo esc_attr( $inst->get_return_url() ?: $current_url ); ?>" />
                             <?php endif; ?>
 
                             <div class="uupd-license-field">
@@ -1650,7 +1682,7 @@ if ( ! class_exists( __NAMESPACE__ . '\\UUPD_License_UI' ) ) {
                             <?php endif; ?>
                         </form>
                         <?php if ( ! $is_const && $license ) : ?>
-                            <?php $inst->render_clear_local_form( $current_url ); ?>
+                            <?php $inst->render_clear_local_form( $inst->get_return_url() ?: $current_url ); ?>
                         <?php endif; ?>
                     </div>
                 </div>
